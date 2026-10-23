@@ -39,11 +39,15 @@ if name == 'git':
         print('main')
     elif args == ['status', '--porcelain']:
         print(os.environ.get('REPO_STATUS', ''), end='')
+    elif 'pull' in args and os.environ.get('UPDATE_SCRIPT'):
+        with open(os.environ['UPDATE_SCRIPT'], 'a') as stream:
+            stream.write('\\n_dvt_work() { echo NEW_CODE_EXECUTED; }\\n')
 raise SystemExit(7 if name == os.environ.get('FAIL_TOOL') else 0)
 ''')
         mock.chmod(0o755)
         for tool in ('sudo', 'apt-get', 'snap', 'claude', 'codex', 'gemini', 'npm'):
             (self.bin / tool).symlink_to(mock)
+        self.mock_repo()
 
     def run_dv(self, *args):
         return subprocess.run(['/bin/bash', str(SCRIPT), *args], env=self.env, text=True, capture_output=True)
@@ -55,7 +59,7 @@ raise SystemExit(7 if name == os.environ.get('FAIL_TOOL') else 0)
         result = self.run_dv('init', '--dry-run')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('변경 없음', result.stdout)
-        self.assertEqual(self.calls(), [])
+        self.assertTrue(all(name == 'git' and 'pull' not in args for name, args, cwd in self.calls()))
 
     def test_install_is_repeatable_and_preserves_existing_dv(self):
         for _ in range(2):
@@ -100,7 +104,8 @@ raise SystemExit(7 if name == os.environ.get('FAIL_TOOL') else 0)
         self.assertEqual(self.calls(), [])
 
     def mock_repo(self):
-        (self.bin / 'git').symlink_to(self.bin / 'mock')
+        if not (self.bin / 'git').exists():
+            (self.bin / 'git').symlink_to(self.bin / 'mock')
         self.env['REPO_ROOT'] = str(SCRIPT.parent)
 
     def test_self_update_and_reload(self):
@@ -134,6 +139,35 @@ raise SystemExit(7 if name == os.environ.get('FAIL_TOOL') else 0)
         result = self.run_dv('update')
         self.assertEqual(result.returncode, 1)
         self.assertNotIn('적용 완료', result.stdout)
+
+    def test_init_updates_before_system_tools(self):
+        result = self.run_dv('init')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = self.calls()
+        pull = next(i for i, (name, args, cwd) in enumerate(calls) if name == 'git' and 'pull' in args)
+        system = next(i for i, (name, args, cwd) in enumerate(calls) if name == 'sudo')
+        self.assertLess(pull, system)
+        self.assertEqual(sum(name == 'git' and 'pull' in args for name, args, cwd in calls), 1)
+
+    def test_init_stops_when_self_update_fails(self):
+        self.env['FAIL_TOOL'] = 'git'
+        self.assertEqual(self.run_dv('init').returncode, 1)
+        self.assertTrue(all(name == 'git' for name, args, cwd in self.calls()))
+
+    def test_init_stops_for_local_changes(self):
+        self.env['REPO_STATUS'] = ' M dv.sh\n'
+        self.assertEqual(self.run_dv('init').returncode, 1)
+        self.assertTrue(all(name == 'git' and 'pull' not in args for name, args, cwd in self.calls()))
+
+    def test_updated_code_runs_in_same_invocation(self):
+        script = self.root / 'dv.sh'
+        script.write_text(SCRIPT.read_text())
+        self.env['REPO_ROOT'] = str(script.parent)
+        self.env['UPDATE_SCRIPT'] = str(script)
+        result = subprocess.run(['/bin/bash', str(script), 'init'], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('NEW_CODE_EXECUTED', result.stdout)
+        self.assertTrue(all(name == 'git' for name, args, cwd in self.calls()))
 
 
 if __name__ == '__main__':

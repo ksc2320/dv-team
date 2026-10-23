@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# dv-team — 팀 공용 개발 도구 업데이트 v1.1.0
+# dv-team — 팀 공용 개발 도구 업데이트 v1.2.0
 # 사용법: bash dv.sh install → source ~/.bash_functions → dv init
 # 개인 dotfiles, 인증정보, 저장소 자동 커밋, 장비 설정은 포함하지 않는다.
 
-DVT_VERSION='1.1.0'
+DVT_VERSION='1.2.0'
 
 _dvt_run() {
     printf '  ▸'; printf ' %q' "$@"; printf '\n'
@@ -139,6 +139,15 @@ _dvt_vim() {
     done
 }
 
+_dvt_work() {
+    local command=$1
+    if [[ $command == init ]]; then _dvt_system; fi
+    if [[ $command == init || $command == ai ]]; then _dvt_ai; fi
+    if [[ $command == init || $command == vim ]]; then _dvt_vim; fi
+    if (( _dvt_failed )); then printf '✘ 일부 업데이트 실패. 위 오류를 확인하세요.\n' >&2; return 1; fi
+    if (( _dvt_dry )); then printf '✔ 실행 예정 항목 표시 완료 (변경 없음)\n'; else printf '✔ 업데이트 완료 (미설치·수정 중 항목은 생략)\n'; fi
+}
+
 _dvt_main() {
     local command=${1:-help} _dvt_dry=0 _dvt_failed=0
     if (( $# )); then shift; fi
@@ -149,9 +158,9 @@ _dvt_main() {
             printf '%s\n' 'dv-team — Ubuntu/Debian 개발 도구 업데이트' \
                 '  install                  현재 파일을 Bash에 등록 (최초 1회)' \
                 '  update [--dry-run]       GitHub에서 dv-team 자체 업데이트' \
-                '  init [--dry-run]         시스템 + AI + Vim 업데이트' \
-                '  ai [--dry-run]           설치된 Claude·Codex·Gemini 업데이트' \
-                '  vim [--dry-run]          기존 Vim 플러그인 업데이트' \
+                '  init [--dry-run]         자체 갱신 후 시스템 + AI + Vim 업데이트' \
+                '  ai [--dry-run]           자체 갱신 후 설치된 Claude·Codex·Gemini 업데이트' \
+                '  vim [--dry-run]          자체 갱신 후 기존 Vim 플러그인 업데이트' \
                 '  version | help           버전 / 도움말' \
                 'sudo는 필요할 때 직접 암호를 묻습니다. 기존 dv가 있으면 dvteam을 쓰세요.'
             return ;;
@@ -163,11 +172,8 @@ _dvt_main() {
     fi
     printf '\033[38;5;153m[dv-team v%s] %s\033[0m\n' "$DVT_VERSION" "$command"
     if [[ $command == update ]]; then _dvt_update; return; fi
-    if [[ $command == init ]]; then _dvt_system; fi
-    if [[ $command == init || $command == ai ]]; then _dvt_ai; fi
-    if [[ $command == init || $command == vim ]]; then _dvt_vim; fi
-    if (( _dvt_failed )); then printf '✘ 일부 업데이트 실패. 위 오류를 확인하세요.\n' >&2; return 1; fi
-    if (( _dvt_dry )); then printf '✔ 실행 예정 항목 표시 완료 (변경 없음)\n'; else printf '✔ 업데이트 완료 (미설치·수정 중 항목은 생략)\n'; fi
+    _dvt_update || return 1
+    _dvt_work "$command"
 }
 
 _dvt_register() {
